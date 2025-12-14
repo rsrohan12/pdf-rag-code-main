@@ -24,7 +24,7 @@ const worker = new Worker(
 
     const embeddings = new OpenAIEmbeddings({
       model: 'text-embedding-3-small',
-      apiKey: '',
+      apiKey: process.env.OPENAI_API_KEY,
     });
 
     const vectorStore = await QdrantVectorStore.fromExistingCollection(
