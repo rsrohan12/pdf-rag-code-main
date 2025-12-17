@@ -1,53 +1,57 @@
+import 'dotenv/config';
 import { Worker } from 'bullmq';
-import { OpenAIEmbeddings } from '@langchain/openai';
 import { QdrantVectorStore } from '@langchain/qdrant';
 import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
-import { OllamaEmbeddings } from "@langchain/ollama";
-import 'dotenv/config';
+import { CharacterTextSplitter } from '@langchain/textsplitters';
+import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai';
 
 const worker = new Worker(
   'file-upload-queue',
   async (job) => {
-    console.log(`Job:`, job.data);
-    const data = JSON.parse(job.data);
-    /*
-    Path: data.path
-    read the pdf from path,
-    chunk the pdf,
-    call the openai embedding model for every chunk,
-    store the chunk in qdrant db
-    */
+    try {
+      console.log('📄 Job received');
 
-    // Load the PDF
-    const loader = new PDFLoader(data.path);
-    const docs = await loader.load();
+      const data = JSON.parse(job.data);
+      const filePath = data.path.replace(/\\/g, '/');
 
-    // const embeddings = new OpenAIEmbeddings({
-    //   model: 'text-embedding-3-small',
-    //   apiKey: process.env.OPENAI_API_KEY,
-    // });
+      console.log('1️⃣ Loading PDF...');
+      const loader = new PDFLoader(filePath);
+      const docs = await loader.load();
+      console.log(`Pages loaded: ${docs.length}`);
 
-    const embeddings = new OllamaEmbeddings({
-      model: 'nomic-embed-text',
-    });
+      console.log('2️⃣ Splitting...');
+      const splitter = new CharacterTextSplitter({
+        chunkSize: 500,
+        chunkOverlap: 100,
+      });
+      const splitDocs = await splitter.splitDocuments(docs);
+      console.log(`Chunks created: ${splitDocs.length}`);
 
-    console.log(embeddings,"emb")
+      console.log('3️⃣ Initializing Gemini embeddings...');
+      const embeddings = new GoogleGenerativeAIEmbeddings({
+        model: 'text-embedding-004',
+        apiKey: process.env.GEMINI_API_KEY,
+      });
 
-    const vectorStore = await QdrantVectorStore.fromExistingCollection(
-      embeddings,
-      {
-        url: 'http://localhost:6333',
-        collectionName: 'pdf-db-testing',
-      }
-    );
-    await vectorStore.addDocuments(docs);
-    console.log(`All docs are added to vector store`);
+      console.log('4️⃣ Writing to Qdrant...');
+      await QdrantVectorStore.fromDocuments(
+        splitDocs,
+        embeddings,
+        {
+          url: 'http://localhost:6333',
+          collectionName: 'pdf-db-testing',
+        }
+      );
+
+      console.log('✅ Vectors stored successfully');
+    } catch (err) {
+      console.error('❌ Worker failed:', err);
+    }
   },
   {
-    concurrency: 100,
     connection: {
       host: 'localhost',
-      port: '6379',
+      port: 6379,
     },
   }
 );

@@ -5,15 +5,23 @@ import { Queue } from 'bullmq';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { QdrantVectorStore } from '@langchain/qdrant';
 import OpenAI from 'openai';
+import { ChatOllama } from "@langchain/ollama";
+import { OllamaEmbeddings } from '@langchain/ollama';
 import 'dotenv/config';
+import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai';
+import Groq from "groq-sdk";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+// const client = new OpenAI({
+//   apiKey: process.env.OPENAI_API_KEY,
+// });
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
 });
+
 const queue = new Queue('file-upload-queue', {
   connection: {
     host: 'localhost',
-    port: '6379',
+    port: '6379', // Redis host url
   },
 });
 
@@ -49,42 +57,56 @@ app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
 });
 
 app.get('/chat', async (req, res) => {
-  const userQuery = req.query.message;
+  try {
+    const userQuery = req.query.message;
 
-  const embeddings = new OpenAIEmbeddings({
-    model: 'text-embedding-3-small',
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-  const vectorStore = await QdrantVectorStore.fromExistingCollection(
-    embeddings,
-    {
-      url: 'http://localhost:6333',
-      collectionName: 'langchainjs-testing',
-    }
-  );
-  const ret = vectorStore.asRetriever({
-    k: 2,
-  });
-  const result = await ret.invoke(userQuery);
+    // 1️⃣ SAME embeddings as worker
+    const embeddings = new GoogleGenerativeAIEmbeddings({
+      model: 'text-embedding-004',
+      apiKey: process.env.GEMINI_API_KEY,
+    });
 
-  const SYSTEM_PROMPT = `
-  You are helfull AI Assistant who answeres the user query based on the available context from PDF File.
-  Context:
-  ${JSON.stringify(result)}
-  `;
+    // 2️⃣ Load vector store
+    const vectorStore = await QdrantVectorStore.fromExistingCollection(
+      embeddings,
+      {
+        url: 'http://localhost:6333', //Qdrant host url
+        collectionName: 'pdf-db-testing',
+      }
+    );
 
-  const chatResult = await client.chat.completions.create({
-    model: 'gpt-4.1',
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userQuery },
-    ],
-  });
+    // 3️⃣ Retrieve (keep k small)
+    const retriever = vectorStore.asRetriever({ k: 2 });
+    const docs = await retriever.invoke(userQuery);
 
-  return res.json({
-    message: chatResult.choices[0].message.content,
-    docs: result,
-  });
+    const context = docs
+      .map(d => d.pageContent)
+      .join('\n\n')
+      .slice(0, 1500);
+
+    // 4️⃣ Groq chat (FAST)
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      temperature: 0,
+      messages: [
+        {
+          role: 'system',
+          content: `Answer ONLY from the context below. If not found, say "I don't know".\n\n${context}`,
+        },
+        { role: 'user', content: userQuery },
+      ],
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: completion.choices[0].message.content,
+      docs,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Chat failed' });
+  }
 });
+
 
 app.listen(8000, () => console.log(`Server started on PORT:${8000}`));
