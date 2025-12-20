@@ -30,4 +30,4 @@ const pdfSchema = new mongoose.Schema(
   }
 );
 
-export const pdf =  mongoose.model("Pdf", pdfSchema);
+export const Pdf =  mongoose.model("Pdf", pdfSchema);

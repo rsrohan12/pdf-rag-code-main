@@ -10,8 +10,10 @@ import { OllamaEmbeddings } from '@langchain/ollama';
 import 'dotenv/config';
 import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai';
 import Groq from "groq-sdk";
-import { connectDB } from './db';
-import { requireAuth } from './middleware';
+import { connectDB } from './db.js';
+import { requireAuth } from './middleware.js';
+import { Pdf } from './models/pdf.js';
+import { Chat } from './models/chat.js';
 
 // const client = new OpenAI({
 //   apiKey: process.env.OPENAI_API_KEY,
@@ -50,15 +52,6 @@ app.get('/', (req, res) => {
   return res.json({ status: 'All Good!' });
 });
 
-await queue.add(
-    'file-ready',
-    JSON.stringify({
-      filename: req.file.originalname,
-      destination: req.file.destination,
-      path: req.file.path,
-    })
-  );
-
 app.post('/upload/pdf', requireAuth ,upload.single('pdf'), async (req, res) => {
   try {
       const userId = req.auth?.userId;
@@ -69,7 +62,6 @@ app.post('/upload/pdf', requireAuth ,upload.single('pdf'), async (req, res) => {
         originalName: req.file.originalname,
         storedName: req.file.filename,
         url: `/uploads/${req.file.filename}`,
-
       });
 
       // 2️⃣ Send job to worker WITH pdfId
@@ -92,13 +84,21 @@ app.post('/upload/pdf', requireAuth ,upload.single('pdf'), async (req, res) => {
     }
 });
 
-app.get('/chat', async (req, res) => {
+app.get("/chat", requireAuth, async (req, res) => {
   try {
-    const userQuery = req.query.message;
+    const { message, pdfId } = req.query;
+    const userId = req.auth.userId;
 
-    // 1️⃣ SAME embeddings as worker
+    if (!message || !pdfId) {
+      return res.status(400).json({
+        success: false,
+        error: "message and pdfId are required",
+      });
+    }
+
+    // 1️⃣ Embeddings (SAME as worker)
     const embeddings = new GoogleGenerativeAIEmbeddings({
-      model: 'text-embedding-004',
+      model: "text-embedding-004",
       apiKey: process.env.GEMINI_API_KEY,
     });
 
@@ -106,41 +106,102 @@ app.get('/chat', async (req, res) => {
     const vectorStore = await QdrantVectorStore.fromExistingCollection(
       embeddings,
       {
-        url: 'http://localhost:6333', //Qdrant host url
-        collectionName: 'pdf-db-testing',
+        url: "http://localhost:6333",
+        collectionName: "pdf-db-testing",
       }
     );
 
-    // 3️⃣ Retrieve (keep k small)
-    const retriever = vectorStore.asRetriever({ k: 2 });
-    const docs = await retriever.invoke(userQuery);
+    // 3️⃣ Retrieve ONLY this PDF’s chunks
+    const retriever = vectorStore.asRetriever({
+      k: 3,
+      filter: {
+        must: [
+          {
+            key: "metadata.pdfId",
+            match: { value: pdfId },
+          },
+        ],
+      },
+    });
+
+    const docs = await retriever.invoke(message);
 
     const context = docs
-      .map(d => d.pageContent)
-      .join('\n\n')
-      .slice(0, 1500);
+      .map((d) => d.pageContent)
+      .join("\n\n")
+      .slice(0, 2000);
 
-    // 4️⃣ Groq chat (FAST)
+    // 4️⃣ Groq chat
     const completion = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       temperature: 0,
       messages: [
         {
-          role: 'system',
-          content: `Answer ONLY from the context below. If not found, say "I don't know".\n\n${context}`,
+          role: "system",
+          content: `Answer ONLY from the context below.
+            If the answer is not present, say "I don't know".
+
+            Context:
+            ${context}`,
         },
-        { role: 'user', content: userQuery },
+        { role: "user", content: message },
       ],
     });
 
+    const aiResponse = completion.choices[0].message.content;
+
+    // 5️⃣ Save chat history (MongoDB)
+    await Chat.findOneAndUpdate(
+      { pdfId, userId },
+      {
+        $push: {
+          messages: [
+            { role: "user", content: message },
+            { role: "assistant", content: aiResponse },
+          ],
+        },
+      },
+      { upsert: true }
+    );
+
     return res.status(200).json({
       success: true,
-      message: completion.choices[0].message.content,
+      message: aiResponse,
       docs,
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Chat failed' });
+    console.error("Chat error:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Chat failed",
+    });
+  }
+});
+
+app.get("/chat/history", requireAuth, async (req, res) => {
+  try {
+    const { pdfId } = req.query;
+    const userId = req.auth.userId;
+
+    if (!pdfId) {
+      return res.status(400).json({
+        success: false,
+        error: "pdfId is required",
+      });
+    }
+
+    const chat = await Chat.findOne({ pdfId, userId });
+
+    return res.status(200).json({
+      success: true,
+      messages: chat?.messages || [],
+    });
+  } catch (err) {
+    console.error("Chat history error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to load chat history",
+    });
   }
 });
 

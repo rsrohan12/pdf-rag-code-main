@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { useAuth } from "@clerk/nextjs";
 import {
   Upload,
   Send,
@@ -11,6 +10,7 @@ import {
   Loader2,
   RotateCcw,
 } from 'lucide-react';
+import { useClerkToken } from '@/hooks/useClerkToken';
 
 /* ---------------- Types ---------------- */
 
@@ -75,20 +75,21 @@ const PDFPanel = ({
 
 /* ---------------- FILE UPLOAD ---------------- */
 
-const FileUploadSection = async({
+const FileUploadSection = ({
   onUploaded,
 }: {
   onUploaded: (pdf: { name: string; url: string }) => void;
 }) => {
   const [uploading, setUploading] = useState(false);
-  const { getToken } = useAuth();
 
-  const token = await getToken();
+  const { getAuthToken } = useClerkToken();
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'application/pdf';
+
+     const token = await getAuthToken();
 
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
