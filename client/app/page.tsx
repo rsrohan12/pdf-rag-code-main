@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useClerkToken } from "@/hooks/useClerkToken";
 import { UserButton } from "@clerk/nextjs";
+import { API_BASE_URL } from "@/lib/config";
 
 /* ---------------- Types ---------------- */
 
@@ -231,7 +232,7 @@ const PDFPanel = ({
 
       <div className="flex-1 bg-gray-100 p-2">
         <iframe
-          src={`http://localhost:8000${pdf.url}`}
+          src={`${API_BASE_URL}${pdf.url}`}
           className="w-full h-full rounded-lg shadow-inner"
           title="PDF Preview"
         />
@@ -266,7 +267,7 @@ const FileUploadSection = ({
       formData.append("pdf", file);
 
       try {
-        const res = await fetch("http://localhost:8000/upload/pdf", {
+        const res = await fetch(`${API_BASE_URL}/upload/pdf`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
           body: formData,
@@ -349,7 +350,7 @@ const ChatSection = ({ pdfId }: { pdfId?: string }) => {
       try {
         const token = await getAuthToken();
         const res = await fetch(
-          `http://localhost:8000/chat/history?pdfId=${pdfId}`,
+          `${API_BASE_URL}/chat/history?pdfId=${pdfId}`,
           {
             headers: { Authorization: `Bearer ${token}` },
           }
@@ -380,7 +381,7 @@ const ChatSection = ({ pdfId }: { pdfId?: string }) => {
     try {
       const token = await getAuthToken();
       const res = await fetch(
-        `http://localhost:8000/chat?pdfId=${pdfId}&message=${encodeURIComponent(
+        `${API_BASE_URL}/chat?pdfId=${pdfId}&message=${encodeURIComponent(
           userMsg
         )}`,
         {
@@ -541,7 +542,7 @@ export default function RAGPDFInterface() {
   useEffect(() => {
     const loadPdfs = async () => {
       const token = await getAuthToken();
-      const res = await fetch("http://localhost:8000/pdfs", {
+      const res = await fetch(`${API_BASE_URL}/pdfs`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -560,7 +561,7 @@ export default function RAGPDFInterface() {
 
       try {
         const token = await getAuthToken();
-        const res = await fetch(`http://localhost:8000/pdfs/${pdfId}`, {
+        const res = await fetch(`${API_BASE_URL}/pdfs/${pdfId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
