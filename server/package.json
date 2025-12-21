@@ -6,7 +6,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon index.js",
-    "dev:worker": "nodemon worker.js"
+    "dev:worker": "nodemon worker.js",
+    "start": "node index.js",
+    "worker": "node worker.js"
   },
   "keywords": [],
   "author": "",
