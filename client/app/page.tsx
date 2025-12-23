@@ -41,7 +41,7 @@ interface IMessage {
 interface PdfItem {
   _id: string;
   originalName: string;
-  url: string;
+  pdfUrl: string;
 }
 
 /* ---------------- SIDEBAR ---------------- */
@@ -232,7 +232,7 @@ const PDFPanel = ({
 
       <div className="flex-1 bg-gray-100 p-2">
         <iframe
-          src={`${API_BASE_URL}${pdf.url}`}
+          src={pdf.pdfUrl}
           className="w-full h-full rounded-lg shadow-inner"
           title="PDF Preview"
         />
@@ -278,7 +278,7 @@ const FileUploadSection = ({
         onUploaded({
           _id: data.pdfId,
           originalName: data.originalName,
-          url: data.url,
+          pdfUrl: data.pdfUrl,
         });
       } finally {
         setUploading(false);
